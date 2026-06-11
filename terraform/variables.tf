@@ -43,8 +43,8 @@ variable "desired_count" {
 }
 
 variable "tags" {
-    type = map(string)
-    default = {
-        Project = "aws-2048-cicd"
-    }
+  type = map(string)
+  default = {
+    Project = "aws-2048-cicd"
+  }
 }
