@@ -16,7 +16,7 @@ On every push to the `main` branch, GitHub Actions builds a new Docker image, ta
 
 ## Architecture Overview
 
-![architecture_overview.png](./architecture_overview.png)
+![architecture_overview.png](./images/architecture_overview.png)
 
 ### Runtime Flow
 
@@ -431,27 +431,19 @@ Add screenshots here to make the portfolio project easier to understand visually
 
 ### Application Running Behind ALB
 
-```text
-screenshots/app-homepage.png
-```
+![app-homepage.png](./images/app-homepage.png)
 
 ### GitHub Actions Successful Deployment
 
-```text
-screenshots/github-actions-success.png
-```
+![github-actions-success.png](./images/github-actions-success.png)
 
 ### ECS Service Stable Deployment
 
-```text
-screenshots/ecs-service.png
-```
+![ecs-service.png](./images/ecs-service.png)
 
 ### ECR Images Tagged by Commit SHA
 
-```text
-screenshots/ecr-images.png
-```
+![ecr-images.png](./images/ecr-images.png)
 
 ---
 
