@@ -106,3 +106,21 @@ jobs:
       run: |
         echo "Testing: ${ALB_URL}/version"
         curl --fail --silent --show-error "${ALB_URL}/version"
+
+    - name: Notify deployment success
+      if: success()
+      run: |
+        aws sns publish \
+          --topic-arn "${{ vars.SNS_TOPIC_ARN }}" \
+          --subject "ECS deployment successful" \
+          --message "ecs-cicd-webapp deployed successfully. Commit: $GITHUB_SHA" \
+          --region us-east-1
+
+    - name: Notify deployment failure
+      if: failure()
+      run: |
+        aws sns publish \
+          --topic-arn "${{ vars.SNS_TOPIC_ARN }}" \
+          --subject "ECS deployment failed" \
+          --message "ecs-cicd-webapp deployment failed. Commit: $GITHUB_SHA. Check GitHub Actions logs." \
+          --region us-east-1
