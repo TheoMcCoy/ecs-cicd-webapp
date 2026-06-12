@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse
 
 
 APP_NAME = os.getenv("APP_NAME", "Containerized Web App")
-APP_VERSION = os.getenv("APP_VERSION", "3s.0.1")
+APP_VERSION = os.getenv("APP_VERSION", "3.0.1")
 
 app = FastAPI(title=APP_NAME, version=APP_VERSION)
 
