@@ -1,190 +1,206 @@
 # ecs-cicd-webapp
 
-Containerized FastAPI web application deployed to Amazon ECS Fargate with Terraform-managed AWS infrastructure and a GitHub Actions CI/CD pipeline.
+A production-style AWS ECS CI/CD portfolio project that provisions cloud infrastructure with Terraform and deploys a containerized Python web application to Amazon ECS Fargate through GitHub Actions.
 
-This project demonstrates a practical cloud deployment workflow: provisioning AWS infrastructure with Terraform, packaging a Python application with Docker, pushing images to Amazon ECR, running containers on ECS behind an Application Load Balancer, and deploying new versions automatically from GitHub.
+The project demonstrates how to combine Infrastructure as Code, Docker image management, AWS container services, IAM/OIDC authentication, Application Load Balancing, and automated deployment workflows in a clean cloud/DevOps delivery pipeline.
+
+---
+
+## Project Overview
+
+`ecs-cicd-webapp` is a containerized FastAPI web application packaged with Docker and served by Gunicorn using Uvicorn workers. The application is pushed to Amazon ECR and deployed as an ECS Fargate service behind an internet-facing Application Load Balancer.
+
+On every push to the `main` branch, GitHub Actions builds a new Docker image, tags it with the Git commit SHA, pushes it to ECR, creates a new ECS task definition revision, updates the ECS service, waits for deployment stability, and verifies the release through the ALB `/version` endpoint.
+
+---
 
 ## Architecture Overview
 
-The application runs in AWS `us-east-1` as an ECS Fargate service. Public HTTP traffic reaches an Application Load Balancer, which forwards requests to ECS tasks on container port `8000`. Docker images are stored in Amazon ECR. GitHub Actions authenticates to AWS using OIDC, builds and tags the Docker image, pushes it to ECR, registers a new ECS task definition revision, updates the ECS service, waits for stability, and verifies the deployment through the ALB `/version` endpoint.
+![architecture_overview.png](./architecture_overview.png)
 
-## Architecture Flow
+### Runtime Flow
 
-```text
-Developer pushes to main
-        |
-        v
-GitHub Actions
-        |
-        |-- Configure AWS credentials with OIDC
-        |-- Build Docker image from ./app
-        |-- Tag image with Git commit SHA
-        |-- Push image to Amazon ECR
-        |-- Download current ECS task definition
-        |-- Register new task definition revision
-        |-- Update ECS service
-        |-- Wait for service stability
-        |-- Verify ALB /version endpoint
-        |
-        v
-Amazon ECS Fargate
-        |
-        v
-Application Load Balancer -> FastAPI container on port 8000
-```
+1. A user sends HTTP traffic to the Application Load Balancer.
+2. The ALB forwards traffic on port `80` to the ECS target group.
+3. The target group routes traffic to ECS Fargate tasks on container port `8000`.
+4. The container runs the Python application using Gunicorn and Uvicorn workers.
+5. ECS sends application logs to Amazon CloudWatch Logs.
+
+---
 
 ## Tech Stack
 
 | Area | Technology |
-| --- | --- |
-| Cloud provider | AWS |
+|---|---|
+| Cloud Provider | AWS |
 | Region | `us-east-1` |
 | Infrastructure as Code | Terraform |
-| Application | Python, FastAPI |
-| Runtime server | Gunicorn with Uvicorn worker |
-| Containerization | Docker |
-| Container registry | Amazon ECR |
-| Compute | Amazon ECS Fargate |
-| Load balancing | Application Load Balancer |
-| Logging | Amazon CloudWatch Logs |
+| Container Runtime | Amazon ECS Fargate |
+| Container Registry | Amazon ECR |
+| Load Balancing | Application Load Balancer |
+| Application | Python FastAPI |
+| WSGI/ASGI Server | Gunicorn with Uvicorn workers |
 | CI/CD | GitHub Actions |
-| AWS authentication | GitHub OIDC and IAM |
+| Authentication | GitHub OIDC to AWS IAM Role |
+| Logging | Amazon CloudWatch Logs |
+
+---
 
 ## Repository Structure
 
 ```text
 .
-|-- .github/
-|   `-- workflows/
-|       `-- deploy-ecs.yml
-|-- app/
-|   |-- Dockerfile
-|   |-- main.py
-|   `-- requirements.txt
-|-- terraform/
-|   |-- main.tf
-|   |-- outputs.tf
-|   |-- providers.tf
-|   |-- variables.tf
-|   |-- version.tf
-|   `-- .terraform.lock.hcl
-|-- .gitignore
-|-- buildspec.yml
-`-- README.md
+├── .github/
+│   └── workflows/
+│       └── deploy-ecs.yml
+├── app/
+│   ├── Dockerfile
+│   ├── main.py
+│   └── requirements.txt
+├── terraform/
+│   ├── main.tf
+│   ├── outputs.tf
+│   ├── providers.tf
+│   ├── variables.tf
+│   ├── version.tf
+│   └── .terraform.lock.hcl
+├── .gitignore
+└── buildspec.yml
 ```
 
-## Application
+### Application Folder
 
-The application is a small FastAPI service designed for container deployment and pipeline verification.
+The `app` folder contains the Python web application and Docker build instructions.
+
+Key endpoints:
 
 | Endpoint | Purpose |
-| --- | --- |
-| `/` | HTML page showing app name, version, and response time |
-| `/health` | Health endpoint used by the ALB target group |
-| `/version` | JSON version endpoint used after deployment |
+|---|---|
+| `/` | Returns the main HTML landing page |
+| `/health` | Used by the ALB target group health check |
+| `/version` | Used to verify the deployed application version |
 
-The container listens on port `8000` and runs FastAPI with Gunicorn and a Uvicorn worker:
+The container exposes port `8000` and runs the FastAPI application using:
 
 ```dockerfile
 CMD ["gunicorn", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000", "main:app"]
 ```
 
-## Terraform Infrastructure
+---
 
-Terraform provisions the AWS infrastructure needed to run and deploy the application:
+## Infrastructure Provisioned by Terraform
 
-- VPC with DNS support and DNS hostnames enabled
-- Two public subnets across available Availability Zones
-- Internet Gateway, route table, and public route associations
-- Application Load Balancer listening on port `80`
-- ALB target group forwarding to ECS tasks on port `8000`
-- ALB health checks using `/health`
-- Security group for public HTTP access to the ALB
-- Security group allowing ECS task traffic from the ALB security group
-- Amazon ECR repository with image scanning on push
+Terraform provisions the AWS infrastructure required to run the containerized application.
+
+### Core Networking
+
+- Custom VPC using CIDR block `10.0.0.0/16`
+- Two public subnets across two Availability Zones
+- Internet Gateway
+- Public route table with default internet route
+- Route table associations for public subnets
+
+### Load Balancing
+
+- Internet-facing Application Load Balancer
+- HTTP listener on port `80`
+- Target group forwarding traffic to ECS tasks on port `8000`
+- Health check path: `/health`
+
+### ECS and Containers
+
 - ECS cluster
 - ECS Fargate task definition
 - ECS service named `ecs-cicd-webapp`
-- CloudWatch log group for ECS container logs
-- IAM task execution role for ECS
-- S3 artifact bucket, CodeBuild, CodePipeline, SNS, and notification resources from an earlier AWS-native pipeline path
+- Desired task count controlled by Terraform variable `desired_count`
+- `awsvpc` networking mode
+- CloudWatch log group with 14-day retention
 
-The ECS service includes:
+### Container Registry
 
-```hcl
-lifecycle {
-  ignore_changes = [task_definition]
-}
+- Amazon ECR repository named `ecs-cicd-webapp`
+- Image scan on push enabled
+- Mutable image tags for portfolio/demo deployment flexibility
+
+### IAM
+
+- ECS task execution role
+- Managed AWS ECS task execution policy attachment
+- IAM roles and policies for deployment tooling
+
+### Additional Pipeline Resources
+
+The Terraform code also includes AWS-native CI/CD resources such as CodeBuild, CodePipeline, an S3 artifact bucket, SNS topic, and CodeStar notification configuration. The main documented deployment path for this repository is GitHub Actions, but the included AWS-native pipeline resources show an alternative CI/CD pattern using AWS developer tools.
+
+---
+
+## CI/CD Pipeline with GitHub Actions
+
+Workflow path:
+
+```text
+.github/workflows/deploy-ecs.yml
 ```
 
-This lets Terraform create and manage the ECS service while GitHub Actions deploys new task definition revisions without Terraform rolling the service back on the next apply.
+The pipeline runs when changes are pushed to the `main` branch and relevant application/workflow files are updated.
 
-## Terraform Outputs
+### Pipeline Steps
 
-The deployment process uses these Terraform outputs:
+1. Check out the repository.
+2. Configure AWS credentials through GitHub OIDC.
+3. Log in to Amazon ECR.
+4. Build the Docker image from `./app`.
+5. Tag the image using the short Git commit SHA.
+6. Push both the SHA-tagged image and `latest` tag to ECR.
+7. Download the current ECS task definition.
+8. Create a new ECS task definition revision with the updated image URI.
+9. Update the ECS service to use the new task definition revision.
+10. Wait for the ECS service to become stable.
+11. Verify the deployment through the ALB `/version` endpoint.
+
+### Required GitHub Repository Variables
+
+The workflow uses the following GitHub Actions repository variables:
+
+| Variable | Description |
+|---|---|
+| `ECS_CLUSTER_NAME` | ECS cluster name from Terraform output |
+| `ECS_SERVICE_NAME` | ECS service name from Terraform output |
+| `ECR_REPOSITORY_URL` | ECR repository URL from Terraform output |
+| `ALB_URL` | Application Load Balancer URL from Terraform output |
+
+These values can be retrieved after `terraform apply`:
 
 ```powershell
+cd terraform
+
 terraform output -raw ecs_cluster_name
 terraform output -raw ecs_service_name
 terraform output -raw ecr_repository_url
 terraform output -raw alb_url
 ```
 
-These values are currently stored as GitHub repository variables:
+Important: the ECS service name is:
 
 ```text
-ECS_CLUSTER_NAME
-ECS_SERVICE_NAME
-ECR_REPOSITORY_URL
-ALB_URL
+ecs-cicd-webapp
 ```
 
-If the Terraform project is destroyed and recreated, values such as the ALB URL, ECR repository URL, ECS cluster name, or ECS service name may change. The GitHub repository variables should be updated after recreation.
-
-## CI/CD Pipeline
-
-The GitHub Actions workflow is located at:
+It is not:
 
 ```text
-.github/workflows/deploy-ecs.yml
+ecs-cicd-webapp-service
 ```
 
-The workflow runs on pushes to `main` when files under `app/` or the workflow file itself change.
+### Required GitHub Secret
 
-Pipeline steps:
+The workflow assumes an AWS IAM role through OIDC. The repository secret must be named exactly:
 
-1. Check out the repository with `actions/checkout@v5`.
-2. Configure AWS credentials with `aws-actions/configure-aws-credentials@v6`.
-3. Authenticate to AWS using an IAM role assumed through GitHub OIDC.
-4. Log in to Amazon ECR with `aws-actions/amazon-ecr-login@v2`.
-5. Build the Docker image from `./app`.
-6. Tag the image using the short Git commit SHA.
-7. Push the SHA-tagged image and the `latest` tag to ECR.
-8. Download the current ECS task definition.
-9. Update the task definition JSON with the new image URI.
-10. Register a new ECS task definition revision.
-11. Update the ECS service to use the new revision.
-12. Wait for the ECS deployment to become stable.
-13. Verify the deployment by calling the ALB `/version` endpoint.
+```text
+ECS_CICD_WEBAPP_GITHUB_ACTIONS_ROLE
+```
 
-## GitHub Actions Configuration
-
-Required repository variables:
-
-| Variable | Description |
-| --- | --- |
-| `ECS_CLUSTER_NAME` | ECS cluster name from Terraform output |
-| `ECS_SERVICE_NAME` | ECS service name from Terraform output. For this project: `ecs-cicd-webapp` |
-| `ECR_REPOSITORY_URL` | ECR repository URL from Terraform output |
-| `ALB_URL` | Application Load Balancer URL from Terraform output |
-
-Required repository secret:
-
-| Secret | Description |
-| --- | --- |
-| `ECS_CICD_WEBAPP_GITHUB_ACTIONS_ROLE` | IAM role ARN assumed by GitHub Actions through OIDC |
-
-Example AWS credentials step:
+Example credentials step:
 
 ```yaml
 - name: Configure AWS credentials
@@ -194,28 +210,63 @@ Example AWS credentials step:
     aws-region: us-east-1
 ```
 
-## IAM and OIDC
+Secret names matter. If the workflow references a different secret name, AWS credential configuration will fail.
 
-This project uses GitHub OIDC instead of storing long-lived AWS access keys in GitHub.
+---
 
-OIDC requirements:
+## GitHub OIDC and IAM Design
 
-- AWS IAM OIDC provider: `token.actions.githubusercontent.com`
-- Audience: `sts.amazonaws.com`
-- IAM role trust policy restricted to this repository and the `main` branch
+This project uses GitHub OpenID Connect instead of long-lived AWS access keys.
 
-The GitHub Actions deployment role needs permissions for:
+### OIDC Provider
 
-- ECR login and image push
-- ECS describe services
-- ECS describe task definition
-- ECS register task definition
-- ECS update service
-- IAM `PassRole` for the ECS task execution role and any task role used by the task definition
+AWS IAM OIDC provider:
 
-## Manual Bootstrap Deployment
+```text
+token.actions.githubusercontent.com
+```
 
-Before CI/CD can deploy new ECS task definition revisions, the initial `bootstrap` image must exist in ECR because the Terraform task definition references it.
+Audience:
+
+```text
+sts.amazonaws.com
+```
+
+### Trust Policy Design
+
+The IAM role trust policy should restrict access to this specific repository and the `main` branch.
+
+Example trust policy condition pattern:
+
+```json
+{
+  "StringEquals": {
+    "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+  },
+  "StringLike": {
+    "token.actions.githubusercontent.com:sub": "repo:<github-owner>/ecs-cicd-webapp:ref:refs/heads/main"
+  }
+}
+```
+
+This limits role assumption to the intended GitHub repository and branch.
+
+### Required IAM Permissions
+
+The GitHub Actions IAM role needs permissions for:
+
+- ECR authentication and image push
+- ECS service discovery
+- ECS task definition discovery
+- ECS task definition registration
+- ECS service updates
+- `iam:PassRole` for the ECS task execution role and task role, where applicable
+
+---
+
+## Manual Deployment Process
+
+Before CI/CD automation, the application can be built, pushed, and deployed manually.
 
 ```powershell
 cd terraform
@@ -234,70 +285,136 @@ $url = terraform output -raw alb_url
 Invoke-RestMethod "$url/version"
 ```
 
-## Security and Git Hygiene
+The initial ECS task definition references a `bootstrap` image tag. This makes the first deployment possible before the automated CI/CD pipeline begins publishing commit-SHA images.
 
-This project follows common infrastructure-as-code hygiene practices by keeping local state, local variables, generated files, virtual environments, and environment files out of version control.
+---
 
-Do not commit:
+## Deployment Verification
 
-- `.terraform/`
-- `terraform.tfstate`
-- `terraform.tfstate.backup`
-- `terraform.tfvars`
-- `.env` files
-- Python cache files and virtual environments
+The pipeline verifies the deployment by calling:
 
-The Terraform provider lock file, `.terraform.lock.hcl`, can be committed because it records selected provider versions and helps make Terraform runs more reproducible.
+```text
+/version
+```
 
-Security decisions demonstrated:
+Example response:
 
-- GitHub Actions uses OIDC instead of static AWS access keys.
-- IAM trust policy should be limited to the intended repository and branch.
-- ECS task ingress is limited to traffic from the ALB security group.
-- ECR image scanning is enabled on push.
-- S3 artifact bucket public access is blocked.
-- S3 artifact bucket server-side encryption is enabled.
-- ECS logs are sent to CloudWatch with a defined retention period.
+```json
+{
+  "app": "Containerized Web App",
+  "version": "3.0.1"
+}
+```
+
+The ALB target group uses:
+
+```text
+/health
+```
+
+Example response:
+
+```json
+{
+  "status": "healthy",
+  "version": "3.0.1"
+}
+```
+
+---
+
+## Security and Version-Control Practices
+
+This project follows important Infrastructure as Code and repository hygiene practices.
+
+### Files That Should Not Be Committed
+
+The following files and folders should stay out of version control:
+
+```text
+.terraform/
+terraform.tfstate
+terraform.tfstate.backup
+terraform.tfvars
+*.tfvars
+*.tfvars.json
+.env
+.env.*
+```
+
+Terraform state can contain sensitive infrastructure information. Variable files can also contain account-specific or environment-specific values.
+
+### Provider Lock File
+
+The Terraform provider lock file can be committed:
+
+```text
+.terraform.lock.hcl
+```
+
+Committing this file improves repeatability by locking provider dependency selections across machines and CI environments.
+
+### Good Git Hygiene
+
+The repository is designed to keep generated Terraform files, state files, secrets, local environment files, and provider binaries out of Git. This keeps the repository lightweight, safer to share, and suitable for a public portfolio.
+
+---
 
 ## Troubleshooting Lessons Learned
 
-Issues identified and fixed while building the deployment flow:
+This project includes several practical CI/CD and cloud deployment lessons.
 
-- GitHub Actions workflows must live under `.github/workflows/`.
-- Secret names in workflow files must exactly match the configured GitHub repository secret.
-- An empty `ECR_REPOSITORY_URL` creates invalid Docker tags such as `:1d064e4`.
-- `ECS_SERVICE_NAME` must be set and must match the actual ECS service name, `ecs-cicd-webapp`.
-- Using current GitHub Actions versions avoids Node.js 20 deprecation warnings:
-  - `actions/checkout@v5`
-  - `aws-actions/configure-aws-credentials@v6`
-  - `aws-actions/amazon-ecr-login@v2`
+| Issue | Root Cause | Resolution |
+|---|---|---|
+| GitHub Actions did not run | Workflow directory was named `.github/workflow` instead of `.github/workflows` | Corrected the workflow path |
+| AWS credential configuration failed | Workflow referenced the wrong GitHub secret name | Standardized the secret name used by the workflow |
+| Docker build failed with `invalid tag ":1d064e4"` | `ECR_REPOSITORY_URL` was empty | Added/validated the GitHub Actions repository variable |
+| ECS deployment failed with `Service cannot be empty` | `ECS_SERVICE_NAME` was missing or incorrect | Set the variable to the actual ECS service name: `ecs-cicd-webapp` |
+| Node.js 20 warning appeared in GitHub Actions | Older GitHub Actions versions used deprecated runtimes | Updated actions to newer versions |
+| Terraform destroy failed because ECR was not empty | ECR repositories cannot be deleted while images exist unless forced | Used `force_delete = true` for portfolio cleanup convenience |
 
-## Screenshots
+Current workflow actions use newer versions:
 
-Suggested screenshots to add:
+```yaml
+actions/checkout@v5
+aws-actions/configure-aws-credentials@v6
+aws-actions/amazon-ecr-login@v2
+```
 
-| Screenshot | What to show |
-| --- | --- |
-| Application homepage | Browser view of the ALB URL |
-| `/version` endpoint | JSON response after a successful deployment |
-| GitHub Actions run | Successful build, push, and ECS deployment |
-| ECS service | Stable service with desired tasks running |
-| ECR repository | SHA-tagged and `latest` images |
-| ALB target group | Healthy registered targets |
+---
+
+## Current Configuration Note
+
+GitHub Actions repository variables are currently populated manually from Terraform outputs. If the Terraform stack is destroyed and recreated, values such as the ALB URL, ECR repository URL, ECS cluster name, or ECS service name may change.
+
+After recreating the infrastructure, refresh these GitHub Actions variables:
+
+```powershell
+terraform output -raw ecs_cluster_name
+terraform output -raw ecs_service_name
+terraform output -raw ecr_repository_url
+terraform output -raw alb_url
+```
+
+---
 
 ## Future Improvements
 
-- Move Terraform state to an S3 backend with DynamoDB state locking.
-- Have GitHub Actions run `terraform init` and read Terraform outputs automatically.
-- Replace manually stored repository variables with values from remote Terraform state.
-- Add `prevent_destroy = true` to protect the ECR repository from accidental deletion.
-- Add HTTPS support with ACM and an ALB HTTPS listener.
-- Add a custom domain with Route 53.
-- Add automated tests before building and pushing Docker images.
-- Add image vulnerability reporting or deployment gates based on ECR scan results.
-- Split infrastructure into Terraform modules as the project grows.
+Planned improvements for a more production-grade workflow:
 
-Future GitHub Actions output reads could use:
+- Move Terraform state to an S3 backend.
+- Add DynamoDB state locking.
+- Allow GitHub Actions to run `terraform init` and read Terraform outputs automatically.
+- Remove hardcoded GitHub Actions deployment variables.
+- Add HTTPS using ACM and an ALB listener on port `443`.
+- Add a custom domain using Route 53.
+- Add container image lifecycle policies in ECR.
+- Consider `prevent_destroy = true` for ECR in production environments.
+- Add automated tests before Docker image publishing.
+- Add vulnerability scanning or policy checks before deployment.
+- Separate dev/stage/prod environments with Terraform workspaces or environment directories.
+
+Example future GitHub Actions output-reading approach:
 
 ```bash
 terraform output -raw ecs_cluster_name
@@ -306,18 +423,59 @@ terraform output -raw ecr_repository_url
 terraform output -raw alb_url
 ```
 
+---
+
+## Screenshots
+
+Add screenshots here to make the portfolio project easier to understand visually.
+
+### Application Running Behind ALB
+
+```text
+screenshots/app-homepage.png
+```
+
+### GitHub Actions Successful Deployment
+
+```text
+screenshots/github-actions-success.png
+```
+
+### ECS Service Stable Deployment
+
+```text
+screenshots/ecs-service.png
+```
+
+### ECR Images Tagged by Commit SHA
+
+```text
+screenshots/ecr-images.png
+```
+
+---
+
 ## Skills Demonstrated
 
-- AWS networking with VPCs, subnets, route tables, and security groups
-- ECS Fargate service deployment behind an Application Load Balancer
-- Docker image creation for a Python FastAPI application
-- Gunicorn and Uvicorn production serving pattern for ASGI apps
-- Amazon ECR image tagging and publishing
-- Terraform infrastructure provisioning and output management
-- ECS task definition revision management
-- GitHub Actions CI/CD workflow design
-- GitHub OIDC authentication with AWS IAM
-- IAM permissions for ECS and ECR deployment workflows
-- CloudWatch logging for containerized workloads
-- Infrastructure security and version-control hygiene
+This project demonstrates practical cloud and DevOps skills, including:
 
+- Designing AWS container infrastructure with Terraform
+- Building and packaging a Python application with Docker
+- Running containers on Amazon ECS Fargate
+- Publishing container images to Amazon ECR
+- Exposing services through an Application Load Balancer
+- Configuring ECS health checks and deployment stability checks
+- Using CloudWatch Logs for container logging
+- Implementing GitHub Actions CI/CD pipelines
+- Using GitHub OIDC for secure AWS authentication
+- Managing IAM permissions for deployment automation
+- Handling Terraform outputs in deployment workflows
+- Practicing safe Git and IaC version-control hygiene
+- Troubleshooting real deployment failures across Docker, ECS, IAM, and GitHub Actions
+
+---
+
+## Author
+
+**Lereko Mohlomi**  
+Cloud and cybersecurity practitioner building hands-on AWS, Terraform, containerization, and CI/CD portfolio projects.
